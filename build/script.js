@@ -2,6 +2,22 @@
 const canvas = document.getElementById("canvas");
 let controls = true;
 let held = false;
+const uniforms = {
+    resolution: [canvas.width, canvas.height],
+    iterations: 100,
+    zoom: 0.5,
+    center: [0.0, 0.0],
+    color1: [0.0, 150.0, 255.0],
+    color2: [0.0, 44.0, 255.0],
+    color3: [103.0, 0.0, 0.0],
+    color4: [0.0, 0.0, 0.0],
+    gamma: 1.0,
+    power: 4.0
+};
+const config = {
+    zoomSensitivity: 1.1,
+    movementSensitivity: 1.5
+};
 main();
 function main() {
     // Init
@@ -130,54 +146,21 @@ function main() {
             power: gl.getUniformLocation(shaderProgram, "power"),
         },
     };
-    const uniforms = {
-        resolution: [canvas.width, canvas.height],
-        iterations: 100,
-        zoom: 1.0,
-        center: [0.0, 0.0],
-        color1: [0.0, 150.0, 255.0],
-        color2: [0.0, 44.0, 255.0],
-        color3: [103.0, 0.0, 0.0],
-        color4: [0.0, 0.0, 0.0],
-        gamma: 1.0,
-        power: 4.0
-    };
     const vbo = initVBO(gl);
-    initListeners(gl, vbo, programInfo, uniforms);
+    initListeners(gl, vbo, programInfo);
+    const color1Controller = gui.addColor(uniforms, "color1");
+    const color2Controller = gui.addColor(uniforms, "color2");
+    const color3Controller = gui.addColor(uniforms, "color3");
+    const color4Controller = gui.addColor(uniforms, "color4");
     const iterationsController = gui.add(uniforms, "iterations", 1, 1000, 1);
-    iterationsController.onChange(() => {
-        controls = false;
-        render(gl, vbo, programInfo, uniforms);
-    });
-    iterationsController.onFinishChange(() => {
-        controls = true;
-    });
-    const colors = [uniforms.color1, uniforms.color2, uniforms.color3, uniforms.color4];
-    colors.forEach((color, i) => {
-        const colorController = gui.addColor(uniforms, `color${i + 1}`);
-        colorController.onChange(() => {
-            controls = false;
-            render(gl, vbo, programInfo, uniforms);
-        });
-        colorController.onFinishChange(() => {
-            controls = true;
-        });
-    });
-    const gammaController = gui.add(uniforms, "gamma", 0.0, 10.0, 0.1);
-    gammaController.onChange(() => {
-        controls = false;
-        render(gl, vbo, programInfo, uniforms);
-    });
-    gammaController.onFinishChange(() => {
-        controls = true;
-    });
+    const gammaController = gui.add(uniforms, "gamma", 0.0, 4.0, 0.1);
     const powerController = gui.add(uniforms, "power", 0.0, 10.0, 0.1);
-    powerController.onChange(() => {
-        controls = false;
-        render(gl, vbo, programInfo, uniforms);
-    });
-    powerController.onFinishChange(() => {
-        controls = true;
+    const zoomSensitivityController = gui.add(config, "zoomSensitivity", 1.01, 1.2, 0.01);
+    const movementSensitivityController = gui.add(config, "movementSensitivity", 0.1, 3.0, 0.1);
+    const controllers = [color1Controller, color2Controller, color3Controller, color4Controller, iterationsController, gammaController, powerController, zoomSensitivityController, movementSensitivityController];
+    controllers.forEach((controller, i) => {
+        controller.onChange(() => { controls = false; render(gl, vbo, programInfo); });
+        controller.onFinishChange(() => { controls = true; });
     });
     let screenshot = function () {
         // Save canvas
@@ -187,13 +170,19 @@ function main() {
         link.click();
     };
     const screenshotController = gui.add({ screenshot }, "screenshot");
-    render(gl, vbo, programInfo, uniforms);
+    let reset = function () {
+        uniforms.center = [0.0, 0.0];
+        uniforms.zoom = 0.5;
+        render(gl, vbo, programInfo);
+    };
+    const resetController = gui.add({ reset }, "reset");
+    render(gl, vbo, programInfo);
 }
-function initListeners(gl, vbo, programInfo, uniforms) {
+function initListeners(gl, vbo, programInfo) {
     document.addEventListener("wheel", (e) => {
         e.preventDefault();
-        uniforms.zoom *= e.deltaY > 0 ? 1.1 : 1 / 1.1;
-        render(gl, vbo, programInfo, uniforms);
+        uniforms.zoom *= e.deltaY > 0 ? config.zoomSensitivity : 1 / config.zoomSensitivity;
+        render(gl, vbo, programInfo);
     });
     document.addEventListener("mousemove", (e) => {
         if (!controls)
@@ -202,9 +191,9 @@ function initListeners(gl, vbo, programInfo, uniforms) {
             return;
         const x = canvas.width / canvas.height * (e.movementX / canvas.width);
         const y = (e.movementY / canvas.height);
-        uniforms.center[0] -= x / uniforms.zoom;
-        uniforms.center[1] += y / uniforms.zoom;
-        render(gl, vbo, programInfo, uniforms);
+        uniforms.center[0] -= config.movementSensitivity * x / uniforms.zoom;
+        uniforms.center[1] += config.movementSensitivity * y / uniforms.zoom;
+        render(gl, vbo, programInfo);
     });
     document.addEventListener("mousedown", (e) => { held = true; });
     document.addEventListener("mouseup", (e) => { held = false; });
@@ -252,7 +241,7 @@ function initVBO(gl) {
     gl.bindBuffer(gl.ARRAY_BUFFER, null);
     return vbo;
 }
-function render(gl, vbo, programInfo, uniforms) {
+function render(gl, vbo, programInfo) {
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindBuffer(gl.ARRAY_BUFFER, vbo);

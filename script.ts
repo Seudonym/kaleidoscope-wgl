@@ -1,17 +1,36 @@
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 let controls = true;
 let held = false;
+const uniforms = {
+  resolution: [canvas.width, canvas.height],
+  iterations: 100,
+  zoom: 0.5,
+  center: [0.0, 0.0],
+  color1: [0.0, 150.0, 255.0],
+  color2: [0.0, 44.0, 255.0],
+  color3: [103.0, 0.0, 0.0],
+  color4: [0.0, 0.0, 0.0],
+  gamma: 1.0,
+  power: 4.0
+};
+
+const config = {
+  zoomSensitivity: 1.1,
+  movementSensitivity: 1.5
+}
+
 
 main();
+
 function main() {
   // Init
-  canvas.width = window.devicePixelRatio*window.innerWidth;
-  canvas.height = window.devicePixelRatio*window.innerHeight;
+  canvas.width = window.devicePixelRatio * window.innerWidth;
+  canvas.height = window.devicePixelRatio * window.innerHeight;
   canvas.style.width = `${window.innerWidth}px`;
   canvas.style.height = `${window.innerHeight}px`;
   let aspect = canvas.width / canvas.height;
 
-  const gl = canvas.getContext("experimental-webgl", {preserveDrawingBuffer: true}) as WebGLRenderingContext;
+  const gl = canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext;
   if (!gl) {
     throw new Error("WebGL not supported");
     return;
@@ -136,80 +155,51 @@ function main() {
     },
   };
 
-  const uniforms = {
-    resolution: [canvas.width, canvas.height],
-    iterations: 100,
-    zoom: 1.0,
-    center: [0.0, 0.0],
-    color1: [0.0, 150.0, 255.0],
-    color2: [0.0, 44.0, 255.0],
-    color3: [103.0, 0.0, 0.0],
-    color4: [0.0, 0.0, 0.0],
-    gamma: 1.0,
-    power: 4.0
-  };
-
   const vbo = initVBO(gl);
 
-  initListeners(gl, vbo, programInfo, uniforms);
+  initListeners(gl, vbo, programInfo);
 
+  const color1Controller = gui.addColor(uniforms, "color1");
+  const color2Controller = gui.addColor(uniforms, "color2");
+  const color3Controller = gui.addColor(uniforms, "color3");
+  const color4Controller = gui.addColor(uniforms, "color4");
   const iterationsController = gui.add(uniforms, "iterations", 1, 1000, 1);
-  iterationsController.onChange(() => { 
-    controls = false;
-    render(gl, vbo, programInfo, uniforms); 
-  });
-  iterationsController.onFinishChange(() => { 
-    controls = true;
-  });
-
-  const colors = [uniforms.color1, uniforms.color2, uniforms.color3, uniforms.color4]
-  colors.forEach((color, i) => {
-    const colorController = gui.addColor(uniforms, `color${i + 1}`);
-    colorController.onChange(() => { 
-      controls = false;
-      render(gl, vbo, programInfo, uniforms); 
-    });
-    colorController.onFinishChange(() => { 
-      controls = true;
-    });
-  });
-
-  const gammaController = gui.add(uniforms, "gamma", 0.0, 10.0, 0.1);
-  gammaController.onChange(() => { 
-    controls = false;
-    render(gl, vbo, programInfo, uniforms); 
-  });
-  gammaController.onFinishChange(() => { 
-    controls = true;
-  });
-
+  const gammaController = gui.add(uniforms, "gamma", 0.0, 4.0, 0.1);
   const powerController = gui.add(uniforms, "power", 0.0, 10.0, 0.1);
-  powerController.onChange(() => { 
-    controls = false;
-    render(gl, vbo, programInfo, uniforms); 
-  });
-  powerController.onFinishChange(() => { 
-    controls = true;
+  const zoomSensitivityController = gui.add(config, "zoomSensitivity", 1.01, 1.2, 0.01);
+  const movementSensitivityController = gui.add(config, "movementSensitivity", 0.1, 3.0, 0.1);
+
+  const controllers = [color1Controller, color2Controller, color3Controller, color4Controller, iterationsController, gammaController, powerController, zoomSensitivityController, movementSensitivityController];
+  controllers.forEach((controller, i) => {
+    controller.onChange(() => { controls = false; render(gl, vbo, programInfo); });
+    controller.onFinishChange(() => { controls = true; });
   });
 
-  let screenshot = function() {
+  let screenshot = function () {
     // Save canvas
     const link = document.createElement("a");
     link.download = "screenshot.png";
     link.href = canvas.toDataURL("image/png");
     link.click();
   };
+  const screenshotController = gui.add({ screenshot }, "screenshot");
 
-  const screenshotController = gui.add({screenshot}, "screenshot");
+  let reset = function() {
+    uniforms.center = [0.0, 0.0];
+    uniforms.zoom = 0.5;
+    render(gl, vbo, programInfo);
+  };
+  const resetController = gui.add({reset}, "reset");
+  
 
-  render(gl, vbo, programInfo, uniforms);
+  render(gl, vbo, programInfo);
 }
 
-function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, uniforms: any) {
+function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any) {
   document.addEventListener("wheel", (e) => {
     e.preventDefault();
-    uniforms.zoom *= e.deltaY > 0 ? 1.1 : 1 / 1.1;
-    render(gl, vbo, programInfo, uniforms);
+    uniforms.zoom *= e.deltaY > 0 ? config.zoomSensitivity : 1 / config.zoomSensitivity;
+    render(gl, vbo, programInfo);
   });
 
   document.addEventListener("mousemove", (e) => {
@@ -218,9 +208,9 @@ function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo:
     const x = canvas.width / canvas.height * (e.movementX / canvas.width);
     const y = (e.movementY / canvas.height);
 
-    uniforms.center[0] -= x / uniforms.zoom;
-    uniforms.center[1] += y / uniforms.zoom;
-    render(gl, vbo, programInfo, uniforms);
+    uniforms.center[0] -= config.movementSensitivity * x / uniforms.zoom;
+    uniforms.center[1] += config.movementSensitivity * y / uniforms.zoom;
+    render(gl, vbo, programInfo);
   });
 
   document.addEventListener("mousedown", (e) => { held = true; });
@@ -289,7 +279,7 @@ function initVBO(gl: WebGLRenderingContext) {
   return vbo;
 }
 
-function render(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, uniforms: any) {
+function render(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any) {
   gl.clearColor(0, 0, 0, 1);
   gl.clear(gl.COLOR_BUFFER_BIT);
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -308,3 +298,5 @@ function render(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, u
   gl.uniform1f(programInfo.uniformLocations.power, uniforms.power);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
+
+
