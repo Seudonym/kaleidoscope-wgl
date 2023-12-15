@@ -1,17 +1,28 @@
-main();
+const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+let controls = true;
+let held = false;
 
+main();
 function main() {
-  const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  canvas.style.width = window.innerWidth + "px";
-  canvas.style.height =window.innerHeight + "px";
-  const gl = canvas.getContext("webgl");
+  // Init
+  canvas.width = window.devicePixelRatio*window.innerWidth;
+  canvas.height = window.devicePixelRatio*window.innerHeight;
+  canvas.style.width = `${window.innerWidth}px`;
+  canvas.style.height = `${window.innerHeight}px`;
+  let aspect = canvas.width / canvas.height;
+
+  const gl = canvas.getContext("experimental-webgl", {preserveDrawingBuffer: true}) as WebGLRenderingContext;
   if (!gl) {
     throw new Error("WebGL not supported");
     return;
   }
 
+  const gui = new dat.GUI({ autoPlace: false });
+  gui.domElement.id = "gui";
+  const gui_container = document.getElementById("gui-container");
+  gui_container?.appendChild(gui.domElement);
+
+  // Shader program init
   const vertexShaderSource = `
     attribute vec2 position;
 
@@ -28,6 +39,14 @@ function main() {
     uniform float zoom;
     uniform vec2 center;
 
+    uniform vec3 color1;
+    uniform vec3 color2;
+    uniform vec3 color3;
+    uniform vec3 color4;
+    uniform float gamma;
+    uniform float power;
+
+    vec3 palette[5];
     
     vec3 mandelbrot(vec2 uv) {
       const float radius = 4.0;
@@ -45,22 +64,53 @@ function main() {
       float sn = i - log2(log2(dot(z, z))) + 4.0;
       sn = sn / float(iterations);
     
-      float v = pow(1.0 - sn, 4.0);
-    
-      return vec3(v);
+      float v = pow(1.0 - sn, power);
+      float pindex = v * 4.0;
+
+      vec3 c1, c2;
+      // Forgive me mother of god but GLES wont let me index
+      for (int i = 0; i < 3; i++) {
+        if (int(pindex) == 0) {
+          c1 = palette[0];
+          c2 = palette[1];
+        }
+        else if (int(pindex) == 1) {
+          c1 = palette[1];
+          c2 = palette[2];
+        }
+        else if (int(pindex) == 2) {
+          c1 = palette[2];
+          c2 = palette[3];
+        }
+        else if (int(pindex) == 3) {
+          c1 = palette[3];
+          c2 = palette[4];
+        }
+      }
+
+      float f = fract(pindex);  
+      
+      return mix(c1, c2, f);
     }
 
     void main() {
       vec2 uv = gl_FragCoord.xy / resolution.xy - vec2(0.5);
       uv *= 2.0 * vec2(resolution.x / resolution.y, 1.0);
+      
+      palette[0] = vec3(0.0);
+      palette[1] = color1;
+      palette[2] = color2;
+      palette[3] = color3;
+      palette[4] = color4;
+
       vec4 color = vec4(mandelbrot(uv / zoom + center), 1.0);
       float absx = abs(uv.x);
       float absy = abs(uv.y);
       // Crosshair
-      if ((absx < 0.002 && absy < 0.02) || (absy < 0.002 && absx < 0.02)) {
-        color = vec4(1.0, 0.0, 0.0, 1.0);
-      }
-
+      // if ((absx < 0.002 && absy < 0.02) || (absy < 0.002 && absx < 0.02)) {
+        // color = vec4(1.0);
+      // }
+      color.rgb = pow(color.rgb, vec3(1.0 / gamma));
       gl_FragColor = color;
     }
   `;
@@ -77,6 +127,12 @@ function main() {
       iterations: gl.getUniformLocation(shaderProgram, "iterations"),
       zoom: gl.getUniformLocation(shaderProgram, "zoom"),
       center: gl.getUniformLocation(shaderProgram, "center"),
+      color1: gl.getUniformLocation(shaderProgram, "color1"),
+      color2: gl.getUniformLocation(shaderProgram, "color2"),
+      color3: gl.getUniformLocation(shaderProgram, "color3"),
+      color4: gl.getUniformLocation(shaderProgram, "color4"),
+      gamma: gl.getUniformLocation(shaderProgram, "gamma"),
+      power: gl.getUniformLocation(shaderProgram, "power"),
     },
   };
 
@@ -85,20 +141,80 @@ function main() {
     iterations: 100,
     zoom: 1.0,
     center: [0.0, 0.0],
+    color1: [0.0, 150.0, 255.0],
+    color2: [0.0, 44.0, 255.0],
+    color3: [103.0, 0.0, 0.0],
+    color4: [0.0, 0.0, 0.0],
+    gamma: 1.0,
+    power: 4.0
   };
 
   const vbo = initVBO(gl);
 
+  initListeners(gl, vbo, programInfo, uniforms);
+
+  const iterationsController = gui.add(uniforms, "iterations", 1, 1000, 1);
+  iterationsController.onChange(() => { 
+    controls = false;
+    render(gl, vbo, programInfo, uniforms); 
+  });
+  iterationsController.onFinishChange(() => { 
+    controls = true;
+  });
+
+  const colors = [uniforms.color1, uniforms.color2, uniforms.color3, uniforms.color4]
+  colors.forEach((color, i) => {
+    const colorController = gui.addColor(uniforms, `color${i + 1}`);
+    colorController.onChange(() => { 
+      controls = false;
+      render(gl, vbo, programInfo, uniforms); 
+    });
+    colorController.onFinishChange(() => { 
+      controls = true;
+    });
+  });
+
+  const gammaController = gui.add(uniforms, "gamma", 0.0, 10.0, 0.1);
+  gammaController.onChange(() => { 
+    controls = false;
+    render(gl, vbo, programInfo, uniforms); 
+  });
+  gammaController.onFinishChange(() => { 
+    controls = true;
+  });
+
+  const powerController = gui.add(uniforms, "power", 0.0, 10.0, 0.1);
+  powerController.onChange(() => { 
+    controls = false;
+    render(gl, vbo, programInfo, uniforms); 
+  });
+  powerController.onFinishChange(() => { 
+    controls = true;
+  });
+
+  let screenshot = function() {
+    // Save canvas
+    const link = document.createElement("a");
+    link.download = "screenshot.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  };
+
+  const screenshotController = gui.add({screenshot}, "screenshot");
+
+  render(gl, vbo, programInfo, uniforms);
+}
+
+function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, uniforms: any) {
   document.addEventListener("wheel", (e) => {
     e.preventDefault();
-    uniforms.zoom *= e.deltaY > 0 ? 1.05 : 1 / 1.05;
+    uniforms.zoom *= e.deltaY > 0 ? 1.01 : 1 / 1.01;
     render(gl, vbo, programInfo, uniforms);
   });
 
-  let held = false;
   document.addEventListener("mousemove", (e) => {
+    if (!controls) return;
     if (!held) return;
-    console.log(e.movementX, e.movementY);
     const x = canvas.width / canvas.height * (e.movementX / canvas.width);
     const y = (e.movementY / canvas.height);
 
@@ -107,14 +223,8 @@ function main() {
     render(gl, vbo, programInfo, uniforms);
   });
 
-  document.addEventListener("mousedown", (e) => {
-    held = true;
-  });
-  document.addEventListener("mouseup", (e) => {
-    held = false;
-  });
-
-  render(gl, vbo, programInfo, uniforms);
+  document.addEventListener("mousedown", (e) => { held = true; });
+  document.addEventListener("mouseup", (e) => { held = false; });
 }
 
 function createShaderProgram(
@@ -145,7 +255,7 @@ function createShaderProgram(
   if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
     throw new Error(
       "Fragment shader compilation failed: " +
-        gl.getShaderInfoLog(fragmentShader),
+      gl.getShaderInfoLog(fragmentShader),
     );
   }
 
@@ -187,8 +297,14 @@ function render(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, u
   gl.vertexAttribPointer(programInfo.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
   gl.enableVertexAttribArray(programInfo.attribLocations.position);
   gl.uniform2f(programInfo.uniformLocations.resolution, programInfo.canvas.width, programInfo.canvas.height);
-  gl.uniform1i(programInfo.uniformLocations.iterations, 100);
+  gl.uniform1i(programInfo.uniformLocations.iterations, uniforms.iterations);
   gl.uniform1f(programInfo.uniformLocations.zoom, uniforms.zoom);
   gl.uniform2f(programInfo.uniformLocations.center, uniforms.center[0], uniforms.center[1]);
+  gl.uniform3f(programInfo.uniformLocations.color1, uniforms.color1[0] / 255.0, uniforms.color1[1] / 255.0, uniforms.color1[2] / 255.0);
+  gl.uniform3f(programInfo.uniformLocations.color2, uniforms.color2[0] / 255.0, uniforms.color2[1] / 255.0, uniforms.color2[2] / 255.0);
+  gl.uniform3f(programInfo.uniformLocations.color3, uniforms.color3[0] / 255.0, uniforms.color3[1] / 255.0, uniforms.color3[2] / 255.0);
+  gl.uniform3f(programInfo.uniformLocations.color4, uniforms.color4[0] / 255.0, uniforms.color4[1] / 255.0, uniforms.color4[2] / 255.0);
+  gl.uniform1f(programInfo.uniformLocations.gamma, uniforms.gamma);
+  gl.uniform1f(programInfo.uniformLocations.power, uniforms.power);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
