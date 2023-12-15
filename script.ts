@@ -208,7 +208,7 @@ function main() {
 function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any, uniforms: any) {
   document.addEventListener("wheel", (e) => {
     e.preventDefault();
-    uniforms.zoom *= e.deltaY > 0 ? 1.01 : 1 / 1.01;
+    uniforms.zoom *= e.deltaY > 0 ? 1.1 : 1 / 1.1;
     render(gl, vbo, programInfo, uniforms);
   });
 

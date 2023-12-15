@@ -192,7 +192,7 @@ function main() {
 function initListeners(gl, vbo, programInfo, uniforms) {
     document.addEventListener("wheel", (e) => {
         e.preventDefault();
-        uniforms.zoom *= e.deltaY > 0 ? 1.01 : 1 / 1.01;
+        uniforms.zoom *= e.deltaY > 0 ? 1.1 : 1 / 1.1;
         render(gl, vbo, programInfo, uniforms);
     });
     document.addEventListener("mousemove", (e) => {
