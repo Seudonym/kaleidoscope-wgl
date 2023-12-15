@@ -271,4 +271,3 @@ function render(gl, vbo, programInfo, uniforms) {
     gl.uniform1f(programInfo.uniformLocations.power, uniforms.power);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
-//# sourceMappingURL=script.js.map
