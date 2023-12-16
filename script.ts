@@ -1,6 +1,13 @@
+import * as dat from "dat.gui";
+import { ProgramInfo } from "./interfaces/program_info.interface";
+import { createShaderProgram, initVBO, render } from "./utils";
+
 const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 let controls = true;
 let held = false;
+let currentProgram: WebGLProgram;
+let currentProgramInfo: ProgramInfo;
+
 const uniforms = {
   resolution: [canvas.width, canvas.height],
   iterations: 100,
@@ -24,10 +31,9 @@ main();
 
 function main() {
   // Init
-  canvas.width = window.devicePixelRatio * window.innerWidth;
-  canvas.height = window.devicePixelRatio * window.innerHeight;
-  canvas.style.width = `${window.innerWidth}px`;
-  canvas.style.height = `${window.innerHeight}px`;
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
   let aspect = canvas.width / canvas.height;
 
   const gl = canvas.getContext("experimental-webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext;
@@ -50,7 +56,7 @@ function main() {
     }
   `;
 
-  const fragmentShaderSource = `
+  const smoothColorShaderSource = `
     precision highp float; 
 
     uniform vec2 resolution;
@@ -87,7 +93,9 @@ function main() {
       float pindex = v * 4.0;
 
       vec3 c1, c2;
-      // Forgive me mother of god but GLES wont let me index
+      // ----------------------------------------------------
+      /* Forgive me mother of god but it wont let me index */
+      // ----------------------------------------------------
       for (int i = 0; i < 3; i++) {
         if (int(pindex) == 0) {
           c1 = palette[0];
@@ -134,72 +142,80 @@ function main() {
     }
   `;
 
-  const shaderProgram = createShaderProgram(gl, vertexShaderSource, fragmentShaderSource);
-  const programInfo = {
+  const smoothColorProgram = createShaderProgram(gl, vertexShaderSource, smoothColorShaderSource);
+  const smoothColorProgramInfo: ProgramInfo = {
     canvas: canvas,
-    program: shaderProgram,
+    program: smoothColorProgram,
+    guiControllers: [],
     attribLocations: {
-      position: gl.getAttribLocation(shaderProgram, "position"),
+      position: gl.getAttribLocation(smoothColorProgram, "position"),
     },
     uniformLocations: {
-      resolution: gl.getUniformLocation(shaderProgram, "resolution"),
-      iterations: gl.getUniformLocation(shaderProgram, "iterations"),
-      zoom: gl.getUniformLocation(shaderProgram, "zoom"),
-      center: gl.getUniformLocation(shaderProgram, "center"),
-      color1: gl.getUniformLocation(shaderProgram, "color1"),
-      color2: gl.getUniformLocation(shaderProgram, "color2"),
-      color3: gl.getUniformLocation(shaderProgram, "color3"),
-      color4: gl.getUniformLocation(shaderProgram, "color4"),
-      gamma: gl.getUniformLocation(shaderProgram, "gamma"),
-      power: gl.getUniformLocation(shaderProgram, "power"),
+      resolution: gl.getUniformLocation(smoothColorProgram, "resolution"),
+      iterations: gl.getUniformLocation(smoothColorProgram, "iterations"),
+      zoom: gl.getUniformLocation(smoothColorProgram, "zoom"),
+      center: gl.getUniformLocation(smoothColorProgram, "center"),
+      color1: gl.getUniformLocation(smoothColorProgram, "color1"),
+      color2: gl.getUniformLocation(smoothColorProgram, "color2"),
+      color3: gl.getUniformLocation(smoothColorProgram, "color3"),
+      color4: gl.getUniformLocation(smoothColorProgram, "color4"),
+      gamma: gl.getUniformLocation(smoothColorProgram, "gamma"),
+      power: gl.getUniformLocation(smoothColorProgram, "power"),
+    },
+    updateUniforms() {
+      gl.uniform2f(this.uniformLocations.resolution, this.canvas.width, this.canvas.height);
+      gl.uniform1i(this.uniformLocations.iterations, uniforms.iterations);
+      gl.uniform1f(this.uniformLocations.zoom, uniforms.zoom);
+      gl.uniform2f(this.uniformLocations.center, uniforms.center[0], uniforms.center[1]);
+      gl.uniform3f(this.uniformLocations.color1, uniforms.color1[0] / 255.0, uniforms.color1[1] / 255.0, uniforms.color1[2] / 255.0);
+      gl.uniform3f(this.uniformLocations.color2, uniforms.color2[0] / 255.0, uniforms.color2[1] / 255.0, uniforms.color2[2] / 255.0);
+      gl.uniform3f(this.uniformLocations.color3, uniforms.color3[0] / 255.0, uniforms.color3[1] / 255.0, uniforms.color3[2] / 255.0);
+      gl.uniform3f(this.uniformLocations.color4, uniforms.color4[0] / 255.0, uniforms.color4[1] / 255.0, uniforms.color4[2] / 255.0);
+      gl.uniform1f(this.uniformLocations.gamma, uniforms.gamma);
+      gl.uniform1f(this.uniformLocations.power, uniforms.power);
+    },
+
+    initGUI(gui: dat.GUI) {
+      const color1Controller = gui.addColor(uniforms, "color1");
+      const color2Controller = gui.addColor(uniforms, "color2");
+      const color3Controller = gui.addColor(uniforms, "color3");
+      const color4Controller = gui.addColor(uniforms, "color4");
+      const iterationsController = gui.add(uniforms, "iterations", 1, 1000, 1);
+      const gammaController = gui.add(uniforms, "gamma", 0.0, 4.0, 0.1);
+      const powerController = gui.add(uniforms, "power", 0.0, 10.0, 0.1);
+      const zoomSensitivityController = gui.add(config, "zoomSensitivity", 1.01, 1.2, 0.01);
+      const movementSensitivityController = gui.add(config, "movementSensitivity", 0.1, 3.0, 0.1);
+
+      this.guiControllers = [color1Controller, color2Controller, color3Controller, color4Controller, iterationsController, gammaController, powerController, zoomSensitivityController, movementSensitivityController];
+      this.guiControllers.forEach((controller, i) => {
+        controller.onChange(() => { controls = false; render(gl, vbo, smoothColorProgramInfo); });
+        controller.onFinishChange(() => { controls = true; });
+      });
+    },
+
+    deleteGUI(gui: dat.GUI) {
+      this.guiControllers.forEach((controller, i) => {
+        gui.remove(controller);
+      });
     },
   };
 
+  currentProgram = smoothColorProgram;
+  currentProgramInfo = smoothColorProgramInfo;
+
   const vbo = initVBO(gl);
+  initCoreListeners(gl, vbo);
+  currentProgramInfo.initGUI(gui);
+  initCoreGUI(gl, vbo, gui);
 
-  initListeners(gl, vbo, programInfo);
-
-  const color1Controller = gui.addColor(uniforms, "color1");
-  const color2Controller = gui.addColor(uniforms, "color2");
-  const color3Controller = gui.addColor(uniforms, "color3");
-  const color4Controller = gui.addColor(uniforms, "color4");
-  const iterationsController = gui.add(uniforms, "iterations", 1, 1000, 1);
-  const gammaController = gui.add(uniforms, "gamma", 0.0, 4.0, 0.1);
-  const powerController = gui.add(uniforms, "power", 0.0, 10.0, 0.1);
-  const zoomSensitivityController = gui.add(config, "zoomSensitivity", 1.01, 1.2, 0.01);
-  const movementSensitivityController = gui.add(config, "movementSensitivity", 0.1, 3.0, 0.1);
-
-  const controllers = [color1Controller, color2Controller, color3Controller, color4Controller, iterationsController, gammaController, powerController, zoomSensitivityController, movementSensitivityController];
-  controllers.forEach((controller, i) => {
-    controller.onChange(() => { controls = false; render(gl, vbo, programInfo); });
-    controller.onFinishChange(() => { controls = true; });
-  });
-
-  let screenshot = function () {
-    // Save canvas
-    const link = document.createElement("a");
-    link.download = "screenshot.png";
-    link.href = canvas.toDataURL("image/png");
-    link.click();
-  };
-  const screenshotController = gui.add({ screenshot }, "screenshot");
-
-  let reset = function() {
-    uniforms.center = [0.0, 0.0];
-    uniforms.zoom = 0.5;
-    render(gl, vbo, programInfo);
-  };
-  const resetController = gui.add({reset}, "reset");
-  
-
-  render(gl, vbo, programInfo);
+  render(gl, vbo, smoothColorProgramInfo);
 }
 
-function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any) {
+function initCoreListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer) {
   document.addEventListener("wheel", (e) => {
     e.preventDefault();
     uniforms.zoom *= e.deltaY > 0 ? config.zoomSensitivity : 1 / config.zoomSensitivity;
-    render(gl, vbo, programInfo);
+    render(gl, vbo, currentProgramInfo);
   });
 
   document.addEventListener("mousemove", (e) => {
@@ -210,93 +226,28 @@ function initListeners(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo:
 
     uniforms.center[0] -= config.movementSensitivity * x / uniforms.zoom;
     uniforms.center[1] += config.movementSensitivity * y / uniforms.zoom;
-    render(gl, vbo, programInfo);
+    render(gl, vbo, currentProgramInfo);
   });
 
   document.addEventListener("mousedown", (e) => { held = true; });
   document.addEventListener("mouseup", (e) => { held = false; });
+
+  // TODO: Implement proper canvas resizing
 }
 
-function createShaderProgram(
-  gl: WebGLRenderingContext,
-  vertexShaderSource: string,
-  fragmentShaderSource: string,
-) {
-  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
-  if (!vertexShader) {
-    throw new Error("Vertex shader creation failed");
-  }
-  gl.shaderSource(vertexShader, vertexShaderSource);
-  gl.compileShader(vertexShader);
+function initCoreGUI(gl: WebGLRenderingContext, vbo: WebGLBuffer, gui: dat.GUI) {
+  let screenshot = function () {
+    const link = document.createElement("a");
+    link.download = "screenshot.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  };
+  const screenshotController = gui.add({ screenshot }, "screenshot");
 
-  if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
-    throw new Error(
-      "Vertex shader compilation failed: " + gl.getShaderInfoLog(vertexShader),
-    );
-  }
-
-  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
-  if (!fragmentShader) {
-    throw new Error("Fragment shader creation failed");
-  }
-  gl.shaderSource(fragmentShader, fragmentShaderSource);
-  gl.compileShader(fragmentShader);
-
-  if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
-    throw new Error(
-      "Fragment shader compilation failed: " +
-      gl.getShaderInfoLog(fragmentShader),
-    );
-  }
-
-  const program = gl.createProgram();
-  if (!program) {
-    throw new Error("Program creation failed");
-  }
-
-  gl.attachShader(program, vertexShader);
-  gl.attachShader(program, fragmentShader);
-  gl.linkProgram(program);
-
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    throw new Error("Program linking failed: " + gl.getProgramInfoLog(program));
-  }
-  return program;
+  let reset = function () {
+    uniforms.center = [0.0, 0.0];
+    uniforms.zoom = 0.5;
+    render(gl, vbo, currentProgramInfo);
+  };
+  const resetController = gui.add({ reset }, "reset");
 }
-
-function initVBO(gl: WebGLRenderingContext) {
-  const vbo = gl.createBuffer();
-  if (!vbo) {
-    throw new Error("VBO creation failed");
-  }
-
-  const vertices = [-1.0, -1.0, -1.0, +1.0, +1.0, -1.0, 1.0, 1.0];
-
-  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.STATIC_DRAW);
-  gl.bindBuffer(gl.ARRAY_BUFFER, null);
-
-  return vbo;
-}
-
-function render(gl: WebGLRenderingContext, vbo: WebGLBuffer, programInfo: any) {
-  gl.clearColor(0, 0, 0, 1);
-  gl.clear(gl.COLOR_BUFFER_BIT);
-  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-  gl.useProgram(programInfo.program);
-  gl.vertexAttribPointer(programInfo.attribLocations.position, 2, gl.FLOAT, false, 0, 0);
-  gl.enableVertexAttribArray(programInfo.attribLocations.position);
-  gl.uniform2f(programInfo.uniformLocations.resolution, programInfo.canvas.width, programInfo.canvas.height);
-  gl.uniform1i(programInfo.uniformLocations.iterations, uniforms.iterations);
-  gl.uniform1f(programInfo.uniformLocations.zoom, uniforms.zoom);
-  gl.uniform2f(programInfo.uniformLocations.center, uniforms.center[0], uniforms.center[1]);
-  gl.uniform3f(programInfo.uniformLocations.color1, uniforms.color1[0] / 255.0, uniforms.color1[1] / 255.0, uniforms.color1[2] / 255.0);
-  gl.uniform3f(programInfo.uniformLocations.color2, uniforms.color2[0] / 255.0, uniforms.color2[1] / 255.0, uniforms.color2[2] / 255.0);
-  gl.uniform3f(programInfo.uniformLocations.color3, uniforms.color3[0] / 255.0, uniforms.color3[1] / 255.0, uniforms.color3[2] / 255.0);
-  gl.uniform3f(programInfo.uniformLocations.color4, uniforms.color4[0] / 255.0, uniforms.color4[1] / 255.0, uniforms.color4[2] / 255.0);
-  gl.uniform1f(programInfo.uniformLocations.gamma, uniforms.gamma);
-  gl.uniform1f(programInfo.uniformLocations.power, uniforms.power);
-  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-}
-
-
